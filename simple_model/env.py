@@ -5,7 +5,7 @@ from gym import spaces
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 import numpy as np
-
+from cognitive_constraints import apply_planning_constraint, get_candidate_actions
 from typing import List, Tuple, Union
 
 
@@ -31,11 +31,14 @@ class BPP(gym.Env):
                         }
                     ),
 
-                'action_mask': spaces.Box(low=0, high=1, shape=(self.num_items * self.max_bin_size[0], )),
+                'action_mask': spaces.Box(low=0, high=1, shape=(self.num_items * self.max_bin_size[0],
+                                                                 )),
             }
         )
 
-        self.action_space = spaces.Discrete(self.num_items * self.max_bin_size[0])
+        self.action_space = spaces.Discrete(
+        self.num_items * self.max_bin_size[0] * self.max_bin_size[1]
+    )
         self.running_reward = 0
 
         # Workaround for max_episode_steps
@@ -54,44 +57,53 @@ class BPP(gym.Env):
         obs = dict()
         obs['states'] = np.array(self.items)
 
-        items = np.arange(1, self.num_items + 1)
-        placements = np.arange(0, self.max_bin_size[0])
+        items = apply_planning_constraint(self.items)
+        xs = np.arange(0, self.max_bin_size[0])
+        ys = np.arange(0, self.max_bin_size[1])
 
-        actions = np.vstack((np.repeat(items, self.max_bin_size[0]), np.tile(placements, self.num_items))).T
+        # Generate all candidate actions: item, x, y
+        actions = np.array([
+            [item, x, y]
+            for item in items
+            for x in xs
+            for y in ys
+        ])
+
         for action in actions:
-            already_placed = self.items[action[0] - 1][-1] != -1
+            item_idx = action[0] - 1
+            already_placed = self.items[item_idx][-1] != -1
             if already_placed:
-                action[:] = [-1, -1]
-            else:
-                size = self.items[action[0] - 1][1 : 3]
+                # mark invalid
+                action[:] = [-1, -1, -1]
+                continue
 
-                block = self.bin[action[1] : action[1] + size[0], :]
-                y = np.where(block.sum(0) == 0)[0]
-                if len(y) == 0:
-                    action[:] = [-1, -1]
-                else:
-                    anchor = np.array([action[1], y[0]])
-                    block = self.bin[anchor[0] : anchor[0] + size[0], anchor[1] : anchor[1] + size[1]]
+            size = self.items[item_idx][1:3]  # height, width
 
-                    # Out of bounds
-                    if anchor[0] + size[0] > self.max_bin_size[0] or anchor[1] + size[1] > self.max_bin_size[1]:
-                        action[:] = [-1, -1]
+            x, y = action[1], action[2]
 
-                    # Overlapping
-                    elif np.any(block):
-                        action[:] = [-1, -1]
+            # Out-of-bounds check
+            if x + size[0] > self.max_bin_size[0] or y + size[1] > self.max_bin_size[1]:
+                action[:] = [-1, -1, -1]
+                continue
+
+            # Overlap check
+            block = self.bin[x:x+size[0], y:y+size[1]]
+            if np.any(block):
+                action[:] = [-1, -1, -1]
+                continue
 
 
         obs['actions'] = actions
         self.actions = actions
 
+        # Build action mask
         action_mask = np.ones(len(actions))
         action_mask[np.where(actions[:, 0] == -1)[0]] = 0
         self.action_mask = action_mask
 
         observation = dict(obs=obs, action_mask=action_mask)
-
-        return observation
+        return observation, items
+    
 
     def reset(self):
         self.items = []
@@ -133,6 +145,7 @@ class BPP(gym.Env):
         self.num_placed = 0
 
         return self._get_obs()
+    
 
     def step(self, action):
         action += 1
@@ -140,8 +153,7 @@ class BPP(gym.Env):
 
         size = self.items[action[0] - 1][1:3]
 
-        block = self.bin[action[1] : action[1] + size[0], :]
-        anchor = np.array([action[1], np.where(block.sum(0) == 0)[0][0]])        
+        anchor = np.array([action[1], action[2]])       
 
         block = self.bin[anchor[0] : anchor[0] + size[0], anchor[1] : anchor[1] + size[1]]
 
@@ -151,18 +163,19 @@ class BPP(gym.Env):
 
         self.num_placed += 1
 
-        if self.num_placed == 10:
-            self.running_reward += 1
-            return self._get_obs(), 1, True, {}
+        reward = size[0] * size[1] # area of the block 
+        
+        self.running_reward += reward
 
-        obs = self._get_obs()
+        obs, items = self._get_obs()
 
-        # No more boxes can be accomodated
+        # Episodio terminado: no caben más bloques
         if self.action_mask.sum() == 0:
-            self.running_reward += -1
-            return obs, -1, True, {}
+            return obs, items, reward, True, {}
 
-        return obs, 0, False, {}
+        return obs, items, 0, False, {}
+    
+
 
     def render(self, mode='human'):
         if self.dim != 2:
