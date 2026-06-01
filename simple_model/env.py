@@ -7,7 +7,7 @@ from matplotlib.patches import Rectangle
 import numpy as np
 from cognitive_constraints import apply_planning_constraint, get_candidate_actions
 from typing import List, Tuple, Union
-
+import os
 
 class BPP(gym.Env):
     def __init__(self, env_config):
@@ -16,6 +16,7 @@ class BPP(gym.Env):
         self.max_bin_size = env_config['max_bin_size']
         self.dim = len(self.bin_size)
         self.num_items = env_config['num_items']
+        self.num_remaining_items = self.num_items
 
         self.items = dict()
         self.bin = np.zeros(self.max_bin_size)
@@ -56,14 +57,13 @@ class BPP(gym.Env):
 
         obs = dict()
         obs['states'] = np.array(self.items)
-
         items = apply_planning_constraint(self.items)
         xs = np.arange(0, self.max_bin_size[0])
         ys = np.arange(0, self.max_bin_size[1])
 
         # Generate all candidate actions: item, x, y
         actions = np.array([
-            [item, x, y]
+            [item[0], x, y]
             for item in items
             for x in xs
             for y in ys
@@ -149,8 +149,8 @@ class BPP(gym.Env):
 
     def step(self, action):
         action += 1
-        action = self.actions[(action * self.action_mask).argmax()]
-
+        print("Self items", self.items)
+        print("FIrst action", action[0])
         size = self.items[action[0] - 1][1:3]
 
         anchor = np.array([action[1], action[2]])       
@@ -169,15 +169,23 @@ class BPP(gym.Env):
 
         obs, items = self._get_obs()
 
+        if self.num_placed == 10:
+            self.running_reward += 1
+            return obs, items, 1, True, {}
+        
         # Episodio terminado: no caben más bloques
         if self.action_mask.sum() == 0:
-            return obs, items, reward, True, {}
+            self.num_remaining_items -= 1
+            self.running_reward += -1
+            return obs, items, -1, True, {}
+        
 
-        return obs, items, 0, False, {}
+        self.num_remaining_items -= 1
+        return obs, items, reward, False, {}
     
 
 
-    def render(self, mode='human'):
+    def render(self, mode='human', show=False, demo= True, frame_id = None):
         if self.dim != 2:
             raise NotImplementedError('Rendering only supported for 2D bins')
 
@@ -201,7 +209,15 @@ class BPP(gym.Env):
             if item[3] != -1:
                 ax2.add_patch(Rectangle((item[3], item[4]), item[1], item[2], color=self.colors[i]))
 
-        plt.show()
+        if show:
+            plt.show()
+        
+        if demo:
+            os.makedirs("demo", exist_ok=True)
+            filename = os.path.join("demo", f"frame_{frame_id}.png")
+            plt.savefig(filename)
+            plt.close(fig)  
+
 
     def set_state(self, state):
         self.items = copy.deepcopy(state[0][0])

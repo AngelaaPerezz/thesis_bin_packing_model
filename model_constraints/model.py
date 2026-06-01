@@ -27,7 +27,7 @@ class Agent(ActorCriticModel):
 
         self.state_encoder = torch.nn.Sequential(
                 torch.nn.Flatten(),
-                torch.nn.Linear(50, 128),
+                torch.nn.Linear(80, 128),  # 16 items * 5 features
                 torch.nn.ReLU(),
                 torch.nn.Linear(128, 128),
                 torch.nn.ReLU(),
@@ -58,8 +58,32 @@ class Agent(ActorCriticModel):
         # Devuelve el valor estimado calculado en forward
         return self._value_out.squeeze(-1)
 
+    # Constantes que deben coincidir con env.py
+    MAX_ITEMS   = 16
+    MAX_BIN_DIM = 13
+    DIM         = 2
+    STATES_SIZE      = MAX_ITEMS * (2 * DIM + 1)        # 80
+    ACTIONS_SIZE     = MAX_ITEMS * MAX_BIN_DIM * 2      # 416
+    ACTION_MASK_SIZE = MAX_ITEMS * MAX_BIN_DIM           # 208
+
     def forward(self, input_dict, state, seq_lens):
-        states, actions = input_dict['obs']['states'].float(), input_dict['obs']['actions'].float()
+        # Durante MCTS (compute_priors_and_value) input_dict ES el tensor de obs.
+        # Durante rollout normal es un dict con clave 'obs_flat' o 'obs'.
+        if isinstance(input_dict, torch.Tensor):
+            obs = input_dict.float()
+        elif 'obs_flat' in input_dict:
+            obs = input_dict['obs_flat'].float()
+        else:
+            obs = input_dict['obs'].float()
+        if obs.dim() == 1:
+            obs = obs.unsqueeze(0)  # añadir dimensión batch si falta
+
+        # Reconstruir los tres componentes via slicing
+        s = self.STATES_SIZE
+        a = s + self.ACTIONS_SIZE
+
+        states  = obs[:, :s].reshape(-1, self.MAX_ITEMS, 2 * self.DIM + 1)  # (B, 16, 5)
+        actions = obs[:, s:a].reshape(-1, self.MAX_ITEMS * self.MAX_BIN_DIM, 2)  # (B, 208, 2)
 
         state_emdedding = self.state_encoder(states)
         action_embedding = self.action_encoder(actions)

@@ -28,8 +28,6 @@ def evaluate():
                 "dirichlet_noise": 0.03,
                 "argmax_tree_policy": False,
                 "add_dirichlet_noise": True,
-                "max_depth": 5,  # 
-
             }
 
     env_config = {'bin_size': [10, 10], 'max_bin_size': [10, 10], 'num_items': 10}
@@ -72,37 +70,8 @@ def evaluate():
 
     while not done:
         action, _, _ = policy.compute_single_action(obs, episode=episode)
-        v_current = policy.model.value_function().item()
         obs, reward, done, _ = env.step(action)
-        episode.v_values.append(v_current)
         episode.length += 1
-
-    # Compute value drops
-    value_drops = []
-
-    for t in range(len(episode.v_values) - 1):
-
-        v_t = float(episode.v_values[t])
-        v_t1 = float(episode.v_values[t + 1])
-
-        # Positive delta = worsening
-        delta = v_t - v_t1
-
-        value_drops.append(delta)
-
-    # Percentile threshold (top 10% largest drops)
-    threshold = np.percentile(value_drops, 90)
-
-    # Count backtracking events
-    replan_events = sum(
-        delta > threshold
-        for delta in value_drops
-    )
-
-    episode.replan_events = replan_events
-
-    print(f"Backtracking threshold: {threshold:.4f}")
-    print(f"Backtracking events: {replan_events}")
 
     env.render()
     ray.shutdown()

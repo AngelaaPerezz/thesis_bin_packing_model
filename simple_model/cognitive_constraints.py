@@ -6,22 +6,23 @@ MEMORY_LIMIT = 4
 
 
 def apply_planning_constraint(items):
-    # Get unplaced items with their areas and memory limit
-    areas = []
-    ids = []
 
-    for item in items:
-        if item[3] == -1:  # not placed yet
-            area = item[1] * item[2] # height * width
-            areas.append(area)
-            ids.append(item[0])  # item_id 
+     # filter unplaced items
+    unplaced_items = [item for item in items if item[3] == -1]
 
-    if len(ids) > 0:
-        k = min(MEMORY_LIMIT, len(ids))
-        items = np.array(ids)[np.argsort(areas)[-k:]]
-    else:
-        items = np.array([])
-    return items
+    if len(unplaced_items) == 0:
+        return []
+
+    # sort unplaced items 
+    sorted_items = sorted(unplaced_items, key=lambda x: x[1]*x[2], reverse=True)
+
+    # apply memory limit and get the top k greatest items
+    k = min(MEMORY_LIMIT, len(sorted_items))
+    top_items = sorted_items[:k]
+
+    return top_items
+
+
 
 def get_candidate_actions(obs, item_id, max_candidates=5):
     """
@@ -32,7 +33,7 @@ def get_candidate_actions(obs, item_id, max_candidates=5):
     valid_actions = obs['obs']['actions'][valid_indices]
 
     # keep only actions for this item
-    item_actions = valid_actions[valid_actions[:, 0] == item_id]
+    item_actions = valid_actions[valid_actions[:, 0] == item_id[0] ]
 
     if len(item_actions) == 0:
         return []

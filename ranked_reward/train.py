@@ -13,14 +13,14 @@ def train():
     ray.init(num_gpus=1)
 
     mcts_config = {
-                "puct_coefficient": 1.0,
-                "num_simulations": 300,
-                "temperature": 1.5,
-                "dirichlet_epsilon": 0.25,
-                "dirichlet_noise": 0.03,
-                "argmax_tree_policy": True,
-                "add_dirichlet_noise": True,
-            }
+        "puct_coefficient": 1.0,
+        "num_simulations": 300,
+        "temperature": 1.5,
+        "dirichlet_epsilon": 0.25,
+        "dirichlet_noise": 0.03,
+        "argmax_tree_policy": True,
+        "add_dirichlet_noise": True
+    }
 
     env_config = {'bin_size': [10, 10], 'max_bin_size': [10, 10], 'num_items': 10}
 
@@ -49,6 +49,7 @@ def train():
     for i in range(num_iterations):
         print(f'Training iteration: {i + 1}')
         results = algo.train()
+        
 
     path = algo.save()
 
