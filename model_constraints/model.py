@@ -3,7 +3,6 @@ from ray.rllib.algorithms.alpha_zero.models.custom_torch_models import ActorCrit
 from gym import spaces
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from typing import Dict, List, Optional, Tuple, Type, Union
 
@@ -29,14 +28,17 @@ class Agent(ActorCriticModel):
         self.state_encoder = torch.nn.Sequential(
                 torch.nn.Flatten(),
                 torch.nn.Linear(80, 128),  # 16 items * 5 features
+                torch.nn.LayerNorm(128),
                 torch.nn.ReLU(),
                 torch.nn.Linear(128, 128),
+                torch.nn.LayerNorm(128),
                 torch.nn.ReLU(),
                 torch.nn.Linear(128, 128),
             )
 
         self.action_encoder = torch.nn.Sequential(
                 torch.nn.Linear(2, 32),
+                torch.nn.LayerNorm(32),
                 torch.nn.ReLU(),
                 torch.nn.Linear(32, 128),
             )
@@ -54,10 +56,38 @@ class Agent(ActorCriticModel):
                 torch.nn.ReLU(),
                 torch.nn.Linear(128, 1),
             )
+
+        # Inicialización de pesos para prevenir explosión de gradientes
+        for m in self.modules():
+            if isinstance(m, torch.nn.Linear):
+                torch.nn.init.xavier_uniform_(m.weight)
+                torch.nn.init.zeros_(m.bias)
         
     def value_function(self):
-        # Devuelve el valor estimado calculado en forward
         return self._value_out.squeeze(-1)
+
+    def custom_loss(self, policy_loss, loss_inputs):
+        # policy_loss es una lista de losses del algoritmo AlphaZero.
+        # loss_inputs es el SampleBatch con los datos de entrenamiento.
+        # Reemplazamos la loss con una version numericamente estable
+        # que clampea log_softmax para evitar NaN en el cross entropy.
+
+        action_logits = loss_inputs["action_dist_inputs"]
+        mcts_policies = loss_inputs["mcts_policies"]
+        value_label   = loss_inputs["value_label"]
+
+        values = self.value_function()
+        value_loss = torch.mean((values - value_label.float()) ** 2)
+
+        log_probs = torch.nn.functional.log_softmax(action_logits, dim=-1)
+        log_probs = torch.clamp(log_probs, min=-10.0)
+        policy_loss_stable = -torch.mean(
+            torch.sum(mcts_policies.float() * log_probs, dim=-1)
+        )
+
+        total_loss = policy_loss_stable + value_loss
+        # Devolver como lista para que TorchPolicy pueda iterar sobre ella
+        return [total_loss]
 
     # Constantes que deben coincidir con env.py
     MAX_ITEMS   = 16
@@ -85,6 +115,7 @@ class Agent(ActorCriticModel):
 
         states  = obs[:, :s].reshape(-1, self.MAX_ITEMS, 2 * self.DIM + 1)  # (B, 16, 5)
         actions = obs[:, s:a].reshape(-1, self.MAX_ITEMS * self.MAX_BIN_DIM, 2)  # (B, 208, 2)
+        action_mask = obs[:, a:]  # (B, 208)
 
         state_emdedding = self.state_encoder(states)
         action_embedding = self.action_encoder(actions)
@@ -96,11 +127,12 @@ class Agent(ActorCriticModel):
 
         action_out = torch.matmul(action_embedding, final_embedding.reshape(-1, action_embedding.shape[-1], 1))[:, :, 0]
 
+        action_out = torch.where(
+            action_mask.bool(),
+            action_out,
+            torch.full_like(action_out, -1e2)
+        )
+
         self._value_out = self.mlp_value(embedding)
-        # at the end of forward(), temporarily:
-        priors = F.softmax(action_out, dim=-1)
-        print(f"prior min={priors.min().item():.4f} max={priors.max().item():.4f} std={priors.std().item():.4f}")
 
         return action_out, None
-    
-    

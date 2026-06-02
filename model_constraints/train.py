@@ -13,7 +13,7 @@ def train():
 
     mcts_config = {
         "puct_coefficient": 1.0,
-        "num_simulations": 50,
+        "num_simulations": 300,   # paper uses 300
         "temperature": 1.5,
         "dirichlet_epsilon": 0.25,
         "dirichlet_noise": 0.03,
@@ -24,7 +24,7 @@ def train():
     ranked_rewards = {
         "enable": True,
         "percentile": 75,
-        "buffer_max_length": 5000,
+        "buffer_max_length": 250,   # paper uses 250
         "initialize_buffer": True,
         "num_init_rewards": 50,
     }
@@ -61,11 +61,13 @@ def train():
             mcts_config=mcts_config,
             num_sgd_iter=10,
             ranked_rewards=ranked_rewards,
-            train_batch_size=2048,
+            train_batch_size=32,
+            lr=1e-5,
+            grad_clip=0.5,
         )
         .rollouts(
             num_rollout_workers=4,
-            rollout_fragment_length=32,
+            rollout_fragment_length=50,  # ~50 problems per iteration
         )
     )
 
@@ -79,6 +81,10 @@ def train():
         reward_mean = results.get('episode_reward_mean', 'N/A')
         ep_len_mean = results.get('episode_len_mean', 'N/A')
         print(f'  reward={reward_mean:.3f}, ep_len={ep_len_mean}')
+        # Check if network weights are changing
+        policy = algo.get_policy()
+        params = list(policy.model.parameters())
+        print(f"  weight_norm={sum(p.norm().item() for p in params):.3f}")
         if (i + 1) % 50 == 0:
             path = algo.save()
             print(f'  Checkpoint: {path}')
