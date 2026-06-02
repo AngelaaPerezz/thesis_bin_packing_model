@@ -3,6 +3,7 @@ from ray.rllib.algorithms.alpha_zero.models.custom_torch_models import ActorCrit
 from gym import spaces
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from typing import Dict, List, Optional, Tuple, Type, Union
 
@@ -96,5 +97,10 @@ class Agent(ActorCriticModel):
         action_out = torch.matmul(action_embedding, final_embedding.reshape(-1, action_embedding.shape[-1], 1))[:, :, 0]
 
         self._value_out = self.mlp_value(embedding)
+        # at the end of forward(), temporarily:
+        priors = F.softmax(action_out, dim=-1)
+        print(f"prior min={priors.min().item():.4f} max={priors.max().item():.4f} std={priors.std().item():.4f}")
 
         return action_out, None
+    
+    

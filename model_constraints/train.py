@@ -24,9 +24,9 @@ def train():
     ranked_rewards = {
         "enable": True,
         "percentile": 75,
-        "buffer_max_length": 1000,
+        "buffer_max_length": 5000,
         "initialize_buffer": True,
-        "num_init_rewards": 100,
+        "num_init_rewards": 50,
     }
 
     env_config = {
@@ -61,8 +61,7 @@ def train():
             mcts_config=mcts_config,
             num_sgd_iter=10,
             ranked_rewards=ranked_rewards,
-            train_batch_size=512,
-            lr=1e-3
+            train_batch_size=2048,
         )
         .rollouts(
             num_rollout_workers=4,
@@ -70,7 +69,7 @@ def train():
         )
     )
 
-    num_iterations = 500
+    num_iterations = 1000
 
     algo = config.build()
 
@@ -78,8 +77,11 @@ def train():
         print(f'Iteración {i + 1}/{num_iterations}')
         results = algo.train()
         reward_mean = results.get('episode_reward_mean', 'N/A')
-        ep_len_mean = results.get('episode_len_mean', 'N/A')  # add this
-        print(f'Iteración {i+1}: reward={reward_mean:.3f}, ep_len={ep_len_mean}')
+        ep_len_mean = results.get('episode_len_mean', 'N/A')
+        print(f'  reward={reward_mean:.3f}, ep_len={ep_len_mean}')
+        if (i + 1) % 50 == 0:
+            path = algo.save()
+            print(f'  Checkpoint: {path}')
 
     path = algo.save()
     print(f'Modelo guardado en {path}')

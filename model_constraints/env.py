@@ -27,7 +27,11 @@ class MaskedBox(spaces.Box):
         # low=-1 cubre padding; high=MAX_ITEMS cubre índices de item (1..16)
         # que son mayores que MAX_BIN_DIM
         super().__init__(low=-1, high=self.MAX_ITEMS, shape=(total,), dtype=np.float32)
-        self.original_space = self
+        # original_space requerido por ActorCriticModel. Apunta a un Box independiente
+        # (no a self) para evitar recursión infinita al serializar el checkpoint.
+        self.original_space = spaces.Box(
+            low=-1, high=self.MAX_ITEMS, shape=(total,), dtype=np.float32
+        )
 
 
 class ObsArray(np.ndarray):
@@ -140,8 +144,6 @@ class BPP(gym.Env):
         ])
         # Devolver ObsArray para que obs["action_mask"] funcione en ranked_rewards
         obs = flat.view(ObsArray)
-        print(f"valid actions: {action_mask.sum():.0f}/{len(action_mask)}")
-
         return obs
 
     # ------------------------------------------------------------------
@@ -205,14 +207,15 @@ class BPP(gym.Env):
         self.num_placed += 1
 
         if self.num_placed == self.num_items:
-            self.running_reward += 1
-            return self._get_obs(), 1, True, False, {}
+            return self._get_obs(), 1.0, True, False, {}
 
         obs = self._get_obs()
 
         if self.action_mask.sum() == 0:
-            self.running_reward += -1
-            return obs, -1, True, False, {}
+            # Fracción del puzzle resuelto: da a R2 una distribución continua
+            # entre 0 y 1, con el éxito siempre en 1.0
+            reward = self.num_placed / self.num_items
+            return obs, reward, True, False, {}
 
         return obs, 0, False, False, {}
 
