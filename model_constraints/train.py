@@ -5,7 +5,7 @@ import pandas as pd
 import ray
 from ray.rllib.algorithms import alpha_zero
 from ray.tune.registry import register_env
-
+import time
 from env import BPP
 from model import Agent
 
@@ -15,7 +15,9 @@ register_env('Bpp-v1', BPP)
 # Both bin sizes trained together at each stage
 CURRICULUM = [
     # Stage 1: 13 items (easiest)
-    [{'bin_size': [12, 12], 'max_bin_size': [12, 12], 'num_items': 13},
+    [{'bin_size': [6,6], 'max_bin_size': [13,13], 'num_items': 4}],
+    [{'bin_size': [8,8], 'max_bin_size': [13,13], 'num_items': 6}],
+    [
      {'bin_size': [13, 13], 'max_bin_size': [13, 13], 'num_items': 13}],
     # Stage 2: add 14 items
     [{'bin_size': [12, 12], 'max_bin_size': [12, 12], 'num_items': 13},
@@ -41,13 +43,13 @@ CURRICULUM = [
 ]
 
 # Iterations per stage — more on early stages to build a solid foundation
-ITERATIONS_PER_STAGE = [200, 200, 200, 400]
+ITERATIONS_PER_STAGE = [2, 10, 200, 200, 200, 400]
 
 
 def make_config(env_config):
     mcts_config = {
         "puct_coefficient": 1.0,
-        "num_simulations": 300,
+        "num_simulations": 50,
         "temperature": 1.5,
         "dirichlet_epsilon": 0.25,
         "dirichlet_noise": 0.03,
@@ -57,7 +59,7 @@ def make_config(env_config):
     ranked_rewards = {
         "enable": True,
         "percentile": 75,
-        "buffer_max_length": 250,
+        "buffer_max_length": 500,
         "initialize_buffer": True,
         "num_init_rewards": 50,
     }
@@ -80,7 +82,7 @@ def make_config(env_config):
             mcts_config=mcts_config,
             num_sgd_iter=10,
             ranked_rewards=ranked_rewards,
-            train_batch_size=32,
+            train_batch_size=256,
             lr=5e-5,
             grad_clip=0.5,
         )
@@ -97,9 +99,8 @@ def train():
     all_rewards   = []
     all_ep_lens   = []
     all_norms     = []
-    checkpoint_path = r"C:\Users\sira1\ray_results\AlphaZero_Bpp-v1_2026-06-02_20-12-22a_7icunb\checkpoint_000100"
-
-
+    # checkpoint_path = r"C:\Users\sira1\ray_results\AlphaZero_Bpp-v1_2026-06-03_13-40-10wnmi65_m\checkpoint_000050"
+    checkpoint_path = None  # Set to None to start from scratch, or provide path to resume
     for stage_idx, configs in enumerate(CURRICULUM):
         stage_num    = stage_idx + 1
         num_iters    = ITERATIONS_PER_STAGE[stage_idx]
@@ -114,18 +115,23 @@ def train():
         else:
             print(f"\n=== Stage {stage_num}: starting from scratch ===")
 
-        config_strings = [
+        config_strings = ", ".join(
             f"{c['bin_size'][0]}x{c['bin_size'][1]} n={c['num_items']}"
             for c in configs
-        ]
+        )
 
-        print(f"Configs: {config_strings}")
-        
+        print(f"Configs: [{config_strings}]")
         stage_rewards = []
         stage_ep_lens = []
 
         for i in range(num_iters):
+            t0 = time.time()
             results    = algo.train()
+            t1 = time.time()
+            print(f"Iteration {i+1} took {t1-t0:.1f}s")
+            print(f"  episodes this iter: {results.get('episodes_this_iter', '?')}")
+            print(f"  timesteps total: {results.get('timesteps_total', '?')}")
+            print(f"  episodes total: {results.get('episodes_total', '?')}")
             reward     = results.get('episode_reward_mean', float('nan'))
             ep_len     = results.get('episode_len_mean', float('nan'))
             policy     = algo.get_policy()
