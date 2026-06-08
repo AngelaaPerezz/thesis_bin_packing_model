@@ -206,6 +206,19 @@ class BPP(gym.Env):
         self.items[int(action[0]) - 1][3:5] = anchor
         self.num_placed += 1
 
+        # if self.num_placed == self.num_items:
+        #     return self._get_obs(), 1.0, True, False, {}
+
+        # obs = self._get_obs()
+
+        # if self.action_mask.sum() == 0:
+        #     # Fracción del puzzle resuelto: da a R2 una distribución continua
+        #     # entre 0 y 1, con el éxito siempre en 1.0
+        #     reward = (self.num_placed / self.num_items) 
+        #     return obs, reward, True, False, {}
+        
+        # return obs, 0, False, False, {}
+    
         if self.num_placed == self.num_items:
             return self._get_obs(), 1.0, True, False, {}
 
@@ -214,10 +227,10 @@ class BPP(gym.Env):
         if self.action_mask.sum() == 0:
             # Fracción del puzzle resuelto: da a R2 una distribución continua
             # entre 0 y 1, con el éxito siempre en 1.0
-            reward = self.num_placed / self.num_items
-            return obs, reward, True, False, {}
-
+            return obs, -1, True, False, {}
+        
         return obs, 0, False, False, {}
+    
 
     # ------------------------------------------------------------------
     def render(self, mode='human'):

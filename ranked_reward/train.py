@@ -11,6 +11,7 @@ register_env('Bpp-v1', BPP)
 
 def train():
     ray.init(num_gpus=1)
+    print("started")
 
     mcts_config = {
         "puct_coefficient": 1.0,
