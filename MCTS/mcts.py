@@ -186,103 +186,112 @@ def random_rollout(env, state, max_items=None):
 #  MCTS SEARCH
 # ─────────────────────────────────────────────
 
-def mcts_search(env, stimulus, num_simulations=200, max_depth=None, max_items=None):
-    """
-    Run MCTS on one puzzle stimulus.
-    Returns placement_order, bin_coverage, success.
-    """
-    load_stimulus(env, stimulus)
-    root_state = env.get_state()
 
-    root       = MCTSNode(state=root_state, reward=0, done=False)
-
+def run_mcts_simulations(env, root, current_state, num_simulations, max_depth, max_items):
+    """
+    Run MCTS simulations from a given root node and state.
+    Builds the local search tree via selection, expansion, rollout, backprop.
+    """
     for _ in range(num_simulations):
-        node  = root
-        env.set_state(root_state)
+        node = root
+        env.set_state(current_state)
         depth = 0
-
+ 
+        # ── Selection: traverse existing children via UCB ──
         while not node.done:
             if max_depth is not None and depth >= max_depth:
                 break
             valid = get_valid_action_indices(env, max_items)
             if len(valid) == 0:
                 break
-
-            visited = [a for a in valid if a in node.children]
+ 
+            visited   = [a for a in valid if a in node.children]
             unvisited = [a for a in valid if a not in node.children]
-
+ 
             if unvisited:
-                # ── Expansion: create one new random child and break to rollout ──
-                action_idx = np.random.choice(unvisited)
+                # ── Expansion: pick a random unvisited action ──
+                action_idx         = np.random.choice(unvisited)
                 node.valid_actions = valid
                 _, reward, done, _ = direct_step(env, action_idx)
-                child_state = env.get_state()
-                child = MCTSNode(state=child_state, reward=reward, done=done,
-                                parent=node, action=action_idx)
+                child_state        = env.get_state()
+                child              = MCTSNode(state=child_state, reward=reward,
+                                             done=done, parent=node, action=action_idx)
                 node.children[action_idx] = child
-                node = child
+                node  = child
                 depth += 1
                 break  # go to rollout
-
+ 
             else:
-                # ── Selection: all actions visited, pick best by UCB ──
-                action_idx = max(visited, key=lambda a: node.children[a].ucb_score(node.visit_count))
+                # All actions visited — select best by UCB and go deeper
+                action_idx = max(visited,
+                                 key=lambda a: node.children[a].ucb_score(node.visit_count))
                 node = node.children[action_idx]
                 _, _, done, _ = direct_step(env, action_idx)
                 depth += 1
                 if done:
                     break
-
-        # ── Rollout ──
+ 
+        # ── Rollout: play randomly to end from current node ──
         rollout_state = env.get_state()
         if node.done:
             bw, bh = env.bin_size
             value  = env.bin[:bw, :bh].sum() / (bw * bh)
         else:
             value = random_rollout(env, rollout_state, max_items)
-
-        # ── Backprop ──
+ 
+        # ── Backprop: update all nodes on the path to root ──
         while node is not None:
             node.visit_count += 1
             node.value_sum   += value
             node = node.parent
-
-        # print("Root children:", len(root.children))
-
-        # for a, child in root.children.items():
-        #     print(
-        #         "action:", a,
-        #         "visits:", child.visit_count,
-        #         "children:", len(child.children),
-        #         "value:", child.value_sum / max(child.visit_count,1)
-        #     )
-
-    # ── Extract best path ──
+ 
+ 
+def mcts_search(env, stimulus, num_simulations=200, max_depth=None, max_items=None):
+    """
+    Run MCTS on one puzzle stimulus.
+    At each decision point, runs a fresh local search tree, picks the best
+    action, places the item, then repeats until the game is done.
+    This means max_depth controls lookahead per decision, not total placements.
+    Returns placement_order, bin_coverage, success.
+    """
+    load_stimulus(env, stimulus)
     placement_order = []
-    env.set_state(root_state)
-    node = root
-    done = False
-
-    while not done and node.is_expanded() and node.children:
+    done            = False
+ 
+    while not done:
+        # Save current state as root for this decision
+        current_state = env.get_state()
         valid         = get_valid_action_indices(env, max_items)
-        valid_children = [a for a in valid if a in node.children]
-        if not valid_children:
+        if len(valid) == 0:
             break
-        action_idx = max(valid_children, key=lambda a: node.children[a].visit_count)
-        item_id    = env.actions[action_idx][0]
-        area       = env.items[item_id - 1][1] * env.items[item_id - 1][2]
+ 
+        # Build a fresh local tree for this decision point
+        root = MCTSNode(state=current_state, reward=0, done=False)
+        run_mcts_simulations(env, root, current_state,
+                             num_simulations, max_depth, max_items)
+ 
+        # Restore state (simulations modified env)
+        env.set_state(current_state)
+ 
+        # Pick the most visited child as the best action
+        if not root.children:
+            # No children built (e.g. num_simulations too low) — fall back to random
+            action_idx = np.random.choice(valid)
+        else:
+            action_idx = max(root.children,
+                             key=lambda a: root.children[a].visit_count)
+ 
+        # Execute the chosen action
+        item_id = int(env.actions[action_idx][0])
+        area    = env.items[item_id - 1][1] * env.items[item_id - 1][2]
         placement_order.append((item_id, area))
         _, _, done, _ = direct_step(env, action_idx)
-        node = node.children[action_idx]
-        # print("Extract node:",
-        #     len(node.children),
-        #     "children")
-
+ 
     bw, bh       = env.bin_size
     bin_coverage = env.bin[:bw, :bh].sum() / (bw * bh)
     success      = env.num_placed == env.num_items
     env.render()
-
+ 
     return {
         'placement_order': placement_order,
         'bin_coverage':    bin_coverage,
@@ -333,6 +342,6 @@ if __name__ == '__main__':
         stimulus = json.load(f)
 
     env = make_env(max_bin_size=[13, 13], max_num_items=16)
-    result = simulate_stimulus(env, stimulus, num_simulations=200,  num_runs=1, max_depth=2, max_items=3)
+    result = simulate_stimulus(env, stimulus, num_simulations=200,  num_runs=1, max_depth=13, max_items=13)
 
     print("Sample results: ", result)
