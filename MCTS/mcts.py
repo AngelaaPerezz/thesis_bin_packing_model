@@ -8,7 +8,7 @@ from collections import defaultdict
 from env import BPP
 import colorsys
 import re
-
+import time
 
 # ─────────────────────────────────────────────
 #  ENV HELPERS
@@ -202,6 +202,7 @@ def run_mcts_simulations(env, root, current_state, num_simulations, max_depth, m
             if max_depth is not None and depth >= max_depth:
                 break
             valid = get_valid_action_indices(env, max_items)
+            # print(f"Valid actions at depth {depth}: {valid}")
             if len(valid) == 0:
                 break
  
@@ -262,6 +263,7 @@ def mcts_search(env, stimulus, num_simulations=200, max_depth=None, max_items=No
         # Save current state as root for this decision
         current_state = env.get_state()
         valid         = get_valid_action_indices(env, max_items)
+        # print(f"Valid actions: {valid}")
         if len(valid) == 0:
             break
  
@@ -319,6 +321,63 @@ def compute_trial_stats(result):
     }
 
 
+def greedy_bfd(env, stimulus):
+    load_stimulus(env, stimulus)
+    placement_order = []
+    done = False
+    
+    while not done:
+        valid = get_valid_action_indices(env, max_items=None)
+        if len(valid) == 0:
+            break
+        
+        # Among valid actions, pick the one that:
+        # 1. belongs to the largest unplaced item
+        # 2. among those, maximizes coverage after placement
+        valid_actions = env.actions[valid]
+        
+        # Get areas for all valid actions
+        areas = np.array([env.items[int(a[0]) - 1][1] * env.items[int(a[0]) - 1][2]
+                          for a in valid_actions])
+        
+        # Filter to largest item only
+        max_area = areas.max()
+        largest_item_indices = valid[areas == max_area]
+        
+        # Among those, pick position that maximizes coverage
+        best_idx = None
+        best_coverage = -1
+        
+        for idx in largest_item_indices:
+            action = env.actions[idx]
+            x, y = int(action[1]), int(action[2])
+            w, h = env.items[int(action[0]) - 1][1], env.items[int(action[0]) - 1][2]
+            
+            # Simulate placement
+            env.bin[x:x + w, y:y + h] = 1
+            bw, bh = env.bin_size
+            coverage = env.bin[:bw, :bh].sum()
+            env.bin[x:x + w, y:y + h] = 0  # undo
+            
+            if coverage > best_coverage:
+                best_coverage = coverage
+                best_idx = idx
+        
+        item_id = int(env.actions[best_idx][0])
+        area = env.items[item_id - 1][1] * env.items[item_id - 1][2]
+        placement_order.append((item_id, area))
+        _, _, done, _ = direct_step(env, best_idx)
+    
+    bw, bh = env.bin_size
+    bin_coverage = env.bin[:bw, :bh].sum() / (bw * bh)
+    success = env.num_placed == env.num_items
+    
+    return {
+        'placement_order': placement_order,
+        'bin_coverage': bin_coverage,
+        'success': success,
+    }
+
 # ─────────────────────────────────────────────
 #  SIMULATION DISTRIBUTION
 # ─────────────────────────────────────────────
@@ -342,6 +401,8 @@ if __name__ == '__main__':
         stimulus = json.load(f)
 
     env = make_env(max_bin_size=[13, 13], max_num_items=16)
-    result = simulate_stimulus(env, stimulus, num_simulations=200,  num_runs=1, max_depth=13, max_items=13)
-
+    start_time = time.time()
+    result = simulate_stimulus(env, stimulus, num_simulations=100,  num_runs=1, max_depth=4, max_items=13)
+    end_time = time.time()
+    print(f"Simulated 1 run in {end_time - start_time:.2f} seconds")
     print("Sample results: ", result)
